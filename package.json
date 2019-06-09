@@ -1,0 +1,23 @@
+{
+  "name": "wd_bridge",
+  "version": "1.0.0",
+  "description": "Bridge to wd my cloud home",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "wd",
+    "my",
+    "cloud",
+    "home",
+    "bridge"
+  ],
+  "author": "ghost",
+  "license": "MIT",
+  "dependencies": {
+    "qoa": "^0.2.0",
+    "request": "^2.88.0",
+    "signale": "^1.4.0"
+  }
+}
