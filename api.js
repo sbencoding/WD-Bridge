@@ -400,7 +400,7 @@ function dwl(authToken, fileID, localPath, progressCallback) {
         if (!sizeData.success) {
             resolve(sizeData);
             return;
-        }
+        };
         totalSize = sizeData.result;
         const req = request.get(downloadUrl);
         let currentOffset = 0;

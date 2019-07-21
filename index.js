@@ -59,6 +59,17 @@ async function seekAndEnter(folderName) {
 }
 
 /**
+ * Escape spaces and extend relative paths
+ * @param {string} inputPath The path the user gave
+ */
+function formatPath(inputPath) {
+    while (inputPath.indexOf('\\ ') > 0) {
+        inputPath = inputPath.replace('\\ ', ' ');
+    }
+    return inputPath.startsWith('/') ? inputPath : path.join(lwd, inputPath);
+}
+
+/**
  * Simple command shell for user interaction
  */
 async function handleCommands() {
@@ -135,10 +146,11 @@ async function handleCommands() {
             }
         } else if (command.startsWith('upload ')) {
             const localPath = command.substring(7);
-            const fileName = path.basename(localPath);
+            const fullLocalPath = formatPath(localPath);
+            const fileName = path.basename(fullLocalPath);
             log.startFileUpload(fileName);
             try {
-                await bridge.uploadFile(localPath, (progress) => log.setUploadProgress(fileName, progress.toFixed(2)));
+                await bridge.uploadFile(fullLocalPath, (progress) => log.setUploadProgress(fileName, progress.toFixed(2)));
                 log.fileUploadDone();
             } catch (error) {
                 log.fileUploadFail(error);
@@ -154,8 +166,9 @@ async function handleCommands() {
                 if (target !== undefined) {
                     try {
                         log.startFileDownload(target.name);
-                        await bridge.downloadFile(target.id, target.name, (progress) => log.setDownloadProgress(target.name, progress.toFixed(2)));
-                        log.fileDownloadDone(target.name);
+                        const localPath = path.join(lwd, target.name);
+                        await bridge.downloadFile(target.id, localPath, (progress) => log.setDownloadProgress(target.name, progress.toFixed(2)));
+                        log.fileDownloadDone(localPath);
                     } catch (error) {
                         log.fileDownloadFail(error);
                     }
@@ -180,10 +193,7 @@ async function handleCommands() {
                 console.log(`The current local working directory is: ${lwd}`);
             } else if (localCommand.startsWith('cd ')) {
                 let givenPath = localCommand.substring(3);
-                while (givenPath.indexOf('\\ ') > 0) {
-                    givenPath = givenPath.replace('\\ ', ' ');
-                }
-                const fullPath = givenPath.startsWith('/') ? givenPath : path.join(lwd, givenPath);
+                const fullPath = formatPath(givenPath);
                 if (fs.existsSync(fullPath)) {
                     lwd = fullPath;
                 } else {
@@ -193,10 +203,7 @@ async function handleCommands() {
                 let fullPath = lwd;
                 if (localCommand.length > 2) {
                     let givenPath = localCommand.substring(3);
-                    while (givenPath.indexOf('\\ ') > 0) {
-                        givenPath = givenPath.replace('\\ ', ' ');
-                    }
-                    fullPath = givenPath.startsWith('/') ? givenPath : path.join(lwd, givenPath);
+                    fullPath = formatPath(givenPath);
                 }
 
                 if (fs.existsSync(fullPath)) {
