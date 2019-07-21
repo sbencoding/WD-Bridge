@@ -3,6 +3,10 @@
  */
 const path = require('path');
 /**
+ * Module for filesystem integration
+ */
+const fs = require('fs');
+/**
  * Module for input handling from the terminal
  */
 const qoa = require('qoa');
@@ -22,6 +26,10 @@ const settings = require('./settings');
  * Cache file listing in the current working directory
  */
 let cwdCache = null;
+/**
+ * The local working directory
+ */
+let lwd = __dirname;
 
 /**
  * Authenticate to the wdc
@@ -56,6 +64,9 @@ async function seekAndEnter(folderName) {
 async function handleCommands() {
     while (true) {
         const result = await qoa.input({type: 'input', query: '> ', handle: 'command'});
+        /**
+         * @type {string}
+         */
         const command = result.command;
         if (command === 'exit') break;
         else if (command === 'auth') {
@@ -163,6 +174,50 @@ async function handleCommands() {
             console.log('cd [path] - change the current working directory');
             console.log('upload [local file path] - upload a file to the current working directory');
             console.log('download [remote file name] - download a remote file from the current working directory');
+        } else if (command.startsWith('l ')) {
+            const localCommand = command.substring(2);
+            if (localCommand === 'pwd') {
+                console.log(`The current local working directory is: ${lwd}`);
+            } else if (localCommand.startsWith('cd ')) {
+                let givenPath = localCommand.substring(3);
+                while (givenPath.indexOf('\\ ') > 0) {
+                    givenPath = givenPath.replace('\\ ', ' ');
+                }
+                const fullPath = givenPath.startsWith('/') ? givenPath : path.join(lwd, givenPath);
+                if (fs.existsSync(fullPath)) {
+                    lwd = fullPath;
+                } else {
+                    log.pathNotFound(fullPath);
+                }
+            } else if (localCommand.startsWith('ls')) {
+                let fullPath = lwd;
+                if (localCommand.length > 2) {
+                    let givenPath = localCommand.substring(3);
+                    while (givenPath.indexOf('\\ ') > 0) {
+                        givenPath = givenPath.replace('\\ ', ' ');
+                    }
+                    fullPath = givenPath.startsWith('/') ? givenPath : path.join(lwd, givenPath);
+                }
+
+                if (fs.existsSync(fullPath)) {
+                    const entries = fs.readdirSync(fullPath);
+                    entries.sort((left, right) => {
+                        const a = left.toLowerCase().replace('.', '');
+                        const b = right.toLowerCase().replace('.', '');
+                        if (a > b) return 1;
+                        else if (a < b) return -1;
+                        else return 0;
+                    });
+                    const entryList = entries.map(entry => {
+                        const entryPath = path.join(fullPath, entry);
+                        const isDir = fs.statSync(entryPath).isDirectory();
+                        return {name: entry, isDir};
+                    });
+                    entryList.forEach(entry => log.logEntry(entry));
+                } else {
+                    log.pathNotFound(fullPath);
+                }
+            }
         }
     }
 }

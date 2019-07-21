@@ -701,7 +701,7 @@ async function retryLimited(tryLimit, actionName, abstractedFunction, afArgs) {
             return { success: false };
         }
         tryCounter++;
-        if (attempt > 1) log.debug(`Attempt ${tryCounter} to ${actionName}`);
+        if (tryCounter > 1) log.debug(`Attempt ${tryCounter} to ${actionName}`);
         const result = await abstractedFunction(...afArgs);
         if (!result.success) return await callAbstracted();
         else return { success: true, data: result.data };
