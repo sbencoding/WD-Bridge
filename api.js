@@ -1,3 +1,60 @@
+// #region Typedefs
+/**
+ * @typedef {Object} TokenObject
+ * @property {string} auth The authentication token to the remote endpoint
+ */
+
+/**
+ * @typedef {Object} CredentialsObject
+ * @property {string} user The username to use for authentication
+ * @property {string} pass The password to use for authentication
+ */
+
+/**
+ * @typedef {Object} InternalResult
+ * @property {Boolean} success True if the action was successful, otherwise false
+ * @property {(undefined|Error)} error Undefined if the request didn't throw an error, otherwise the error object itself
+ * @property {Boolean} session True if the action failed due to issues with the session authentication, otherwise false
+ * @property {Any} result The result of the action
+ */
+
+/**
+ * @typedef {Object} MultipartMixedResult
+ * @property {Boolean} success True if the action was successful, otherwise false
+ * @property {(undefined|Error)} error Undefined if the request didn't throw an error, otherwise the error object itself
+ * @property {Boolean} session True if the action failed due to issues with the session authentication, otherwise false
+ * @property {(undefined|Number)} statusCode The status code of the response, undefined if success is false
+ * @property {(undefined|string)} content The response body, undefined if success if false
+ */
+
+/**
+ * @typedef {Object} AbstractedResult
+ * @property {Boolean} success The internal function's success
+ * @property {Any} data The result of the internal function
+ */
+
+/**
+ * @typedef {Object} RemoteEntry
+ * @property {string} id The ID of the remote entry
+ * @property {string} name The name of the remote entry
+ * @property {Boolean} isDir True if the remote entry is a directory, otherwise false
+ */
+
+/**
+ * Called when the file transfer progress updates
+ * @callback InternalTransferProgress
+ * @param {number} progress The current offset where the transfer is happening from
+ */
+
+/**
+ * Called when the file transfer is done
+ * @callback InternalTransferDone
+ * @param {InternalResult} result The result of the file transfer
+ */
+
+// #endregion
+
+// #region Imports and Globals
 /**
  * Import fs for cheking file size and existence
  */
@@ -21,14 +78,17 @@ const { getAPILogger } = require('./logging');
 // const httpsProxy = require('./https-proxy'); // For debugging purposes
 /**
  * History of visited folders
+ * @type {Array<string>}
  */
 let pathStack = [];
 /**
  * Store session id and local storage data
+ * @type {TokenObject}
  */
 let tokens = {};
 /**
  * Store username and password for auto re-login in case of a session timeout
+ * @type {CredentialsObject}
  */
 let creds = {};
 /**
@@ -37,127 +97,19 @@ let creds = {};
 let log = getAPILogger();
 /**
  * Host to send the requests to
+ * @type {string}
  */
 let wdHost = '';
 
-/**
- * Login to your wdc device
- * @param {String} username The username to use for wdc login
- * @param {String} password The password to use for wdc login
- */
-function login(username, password) {
-    return new Promise((resolve) => {
-        const authUrl = 'https://wdc.auth0.com/oauth/ro';
-        const wdcAuth0ClientID = '56pjpE1J4c6ZyATz3sYP8cMT47CZd6rk';
-        request.post(authUrl, {
-            body: JSON.stringify({ // Auth0 specific request, copied from the wdc login request to the authUrl endpoint
-                client_id: wdcAuth0ClientID,
-                connection: 'Username-Password-Authentication',
-                device: '123456789',
-                grant_type: 'password',
-                password: password,
-                username: username,
-                scope: 'openid offline_access',
-            }),
-            headers: {
-                'content-type': 'application/json',
-            }
-        }, (error, response, body) => {
-            if (response.statusCode === 401) {
-                resolve(false);
-                return;
-            }
-            if (error) {
-                log.fatal('Error occurred while authenticating to server');
-                log.error(error);
-                resolve(false);
-                return;
-            }
-            tokens.auth = 'Bearer ' + JSON.parse(body).id_token; // Save the Bearer authorization token
-            resolve(true);
-        });
-    });
-}
+// #endregion
 
-/**
- * List files in a specific folder
- * @param {String} authToken The authentication token
- * @param {String} subPath The folder to list the entries of
- */
-function ls(authToken, subPath) {
-    return new Promise((resolve) => {
-        const listFilesUrl = `https://${wdHost}.remotewd.com/sdk/v2/filesSearch/parents?ids=${subPath}&fields=id,mimeType,name&pretty=false&orderBy=name&order=asc`;
-        request.get(listFilesUrl, { headers: { 'authorization': authToken } }, (error, response, body) => {
-            if (response.statusCode === 401) {
-                resolve({ success: false, error: undefined, session: false });
-                return;
-            }
-            if (error) {
-                log.fatal('Something went wrong');
-                log.debug('Status code: ' + response.statusCode);
-                log.error(error);
-                resolve({ success: false, error: error, session: true });
-                return;
-            }
-            const obj = JSON.parse(body);
-            if (obj.files === undefined) {
-                resolve({ success: true, error: undefined, session: true, result: [] });
-                return;
-            }
-            const parsedResult = JSON.parse(body).files.map(item => {
-                return {
-                    name: item.name,
-                    id: item.id,
-                    isDir: item.mimeType == 'application/x.wd.dir',
-                };
-            });
-            resolve({ success: true, error: undefined, session: true, result: parsedResult });
-        });
-    });
-}
-
-/**
- * Create a new directory in the specified directory
- * @param {String} authToken The authentication token
- * @param {String} subPath The folder to create the new folder in
- * @param {String} folderName The name of the new folder
- */
-function mkdir(authToken, subPath, folderName) {
-    return new Promise((resolve) => {
-        const mkdirUrl = `https://${wdHost}.remotewd.com/sdk/v2/files?resolveNameConflict=true`;
-        request.post(mkdirUrl, {
-            headers: { 'authorization': authToken }, multipart: [
-                {
-                    body: JSON.stringify({ // Directory creation parameters copied from wdc request to mkdirUrl endpoint
-                        'name': folderName,
-                        'parentID': subPath,
-                        'mimeType': 'application/x.wd.dir',
-                    })
-                }
-            ]
-        }, (error, response) => {
-            if (response.statusCode === 401) {
-                resolve({ success: false, error: undefined, session: false });
-                return;
-            }
-            if (error) {
-                log.fatal('Something went wrong');
-                log.debug('Status code: ' + response.statusCode);
-                log.error(error);
-                resolve({ success: false, error: error, session: true });
-                return;
-            }
-
-            const locationParts = response.headers['location'].split('/'); // ID of the new folder gets sent in the location header
-            resolve({ success: true, error: undefined, session: true, result: locationParts[locationParts.length - 1] });
-        });
-    });
-}
+// #region Util functions
 
 /**
  * Send multipart request to the wdc device
  * @param {String} mpData Multipart mixed data to send
  * @param {String} auth Authentication token
+ * @returns {Promise<MultipartMixedResult>} The result of the multipart mixed request
  */
 function multipartMixed(mpData, auth) {
     return new Promise((resolve) => {
@@ -204,24 +156,9 @@ function multipartMixed(mpData, auth) {
 }
 
 /**
- * Remove an entry from the wdc
- * @param {String} authToken The authenticaiton token
- * @param {String} entryID The ID of the entry to remove
- */
-function rm(authToken, entryID) {
-    return new Promise(async (resolve) => {
-        // Request body copied from a folder delete request
-        const postBody = `Content-Id: 0\r\n\r\nDELETE /sdk/v2/files/${entryID} HTTP/1.1\r\nHost: ${wdHost}.remotewd.com\r\nAuthorization: ${authToken}\r\n\r\n`;
-        // Send multipart/mixed to the server (since request module doesn't support the /mixed multipart MIME)
-        const result = await multipartMixed(postBody, authToken);
-        if (!result.success) resolve(result);
-        else resolve({ success: result.status == 200, error: undefined, session: true, result: true });
-    });
-}
-
-/**
  * Format the time based on the cloud's format for mTime in the file upload request
  * WARNING: the GMT time offset is hardcoded to +02:00 for now
+ * @returns {string} The formatted time
  */
 function getFormattedTime() { // TODO: set the GMT offset dynamically
     const date = new Date();
@@ -235,16 +172,221 @@ function getFormattedTime() { // TODO: set the GMT offset dynamically
 }
 
 /**
+ * Yield the specified file's content in blocks
+ * @param {String} filePath The path ofthe file on the local system
+ */
+function* getFileContent(filePath) {
+    let currentOffset = 0;
+    const totalSize = fs.statSync(filePath).size;
+    const bufferSize = 20480; // Block size, each loop reads this many bytes
+    const fd = fs.openSync(filePath, 'r');
+    const buffer = Buffer.alloc(bufferSize); // Buffer to read file contents to
+    while (true) {
+        if (currentOffset >= totalSize) break;
+        const bytesRead = fs.readSync(fd, buffer, 0, bufferSize, currentOffset > totalSize ? currentOffset - totalSize : currentOffset);
+        const isDone = bytesRead != bufferSize; // EOF
+        yield { buffer, bytesRead, currentOffset, isDone };
+        if (isDone) break;
+        currentOffset += bytesRead;
+    }
+}
+
+/**
+ * Retry an abstracted function a certain if failed
+ * @param {number} tryLimit The number of maxiumum executions of the specified function
+ * @param {string} actionName The friendly display name of the action
+ * @param {Function} abstractedFunction The abstracted function to call to exectue the action
+ * @param {Array} afArgs An array of arguments to pass to the abstracted function
+ * @returns {any} The result of the abstracted function
+ */
+async function retryLimited(tryLimit, actionName, abstractedFunction, afArgs) {
+    let tryCounter = 0;
+    /**
+     * Execute the abstracted function the given amount of times if failing
+     * @returns {AbstractedResult}
+     */
+    const callAbstracted = async () => {
+        if (tryCounter > tryLimit) {
+            return { success: false };
+        }
+        tryCounter++;
+        if (tryCounter > 1) log.debug(`Attempt ${tryCounter} to ${actionName}`);
+        /**
+         * @type {AbstractedResult}
+         */
+        const result = await abstractedFunction(...afArgs);
+        if (!result.success) return await callAbstracted();
+        else return { success: true, data: result.data };
+    };
+
+    const recursiveResult = await callAbstracted();
+    if (recursiveResult.success) return recursiveResult.data;
+    else throw new Error(`Tried to ${actionName} 10 times and failed`);
+}
+
+/**
+ * Re-authenticate the client and try the current action again
+ * @param {Function} func The function to call after re-authenticating
+ * @param {Array} args An array of arguments to pass to the function
+ * @returns {Promise} The result of the abstracted function
+ */
+async function authRetry(func, args) {
+    log.warn('Re-authentication initiated');
+    await authenticate(creds.user, creds.pass); // Authenticate with cached credentials
+    return func(...args); // Re-call the parent function
+}
+
+// #endregion
+
+// #region Internal functions
+
+/**
+ * Login to your wdc device
+ * @param {String} username The username to use for wdc login
+ * @param {String} password The password to use for wdc login
+ * @returns {Promise<Boolean>} Promise, true if authentication is successful, otherwise false
+ */
+function login(username, password) {
+    return new Promise((resolve) => {
+        const authUrl = 'https://wdc.auth0.com/oauth/ro';
+        const wdcAuth0ClientID = '56pjpE1J4c6ZyATz3sYP8cMT47CZd6rk';
+        request.post(authUrl, {
+            body: JSON.stringify({ // Auth0 specific request, copied from the wdc login request to the authUrl endpoint
+                client_id: wdcAuth0ClientID,
+                connection: 'Username-Password-Authentication',
+                device: '123456789',
+                grant_type: 'password',
+                password: password,
+                username: username,
+                scope: 'openid offline_access',
+            }),
+            headers: {
+                'content-type': 'application/json',
+            }
+        }, (error, response, body) => {
+            if (response.statusCode === 401) {
+                resolve(false);
+                return;
+            }
+            if (error) {
+                log.fatal('Error occurred while authenticating to server');
+                log.error(error);
+                resolve(false);
+                return;
+            }
+            tokens.auth = 'Bearer ' + JSON.parse(body).id_token; // Save the Bearer authorization token
+            resolve(true);
+        });
+    });
+}
+
+/**
+ * List files in a specific folder
+ * @param {String} authToken The authentication token
+ * @param {String} subPath The folder to list the entries of
+ * @returns {Promise<InternalResult>} The result of the file listing
+ */
+function ls(authToken, subPath) {
+    return new Promise((resolve) => {
+        const listFilesUrl = `https://${wdHost}.remotewd.com/sdk/v2/filesSearch/parents?ids=${subPath}&fields=id,mimeType,name&pretty=false&orderBy=name&order=asc`;
+        request.get(listFilesUrl, { headers: { 'authorization': authToken } }, (error, response, body) => {
+            if (response.statusCode === 401) {
+                resolve({ success: false, error: undefined, session: false });
+                return;
+            }
+            if (error) {
+                log.fatal('Something went wrong');
+                log.debug('Status code: ' + response.statusCode);
+                log.error(error);
+                resolve({ success: false, error: error, session: true });
+                return;
+            }
+            const obj = JSON.parse(body);
+            if (obj.files === undefined) {
+                resolve({ success: true, error: undefined, session: true, result: [] });
+                return;
+            }
+            const parsedResult = JSON.parse(body).files.map(item => {
+                return {
+                    name: item.name,
+                    id: item.id,
+                    isDir: item.mimeType == 'application/x.wd.dir',
+                };
+            });
+            resolve({ success: true, error: undefined, session: true, result: parsedResult });
+        });
+    });
+}
+
+/**
+ * Create a new directory in the specified directory
+ * @param {String} authToken The authentication token
+ * @param {String} subPath The folder to create the new folder in
+ * @param {String} folderName The name of the new folder
+ * @returns {Promise<InternalResult>} The result of the create directoy action
+ */
+function mkdir(authToken, subPath, folderName) {
+    return new Promise((resolve) => {
+        const mkdirUrl = `https://${wdHost}.remotewd.com/sdk/v2/files?resolveNameConflict=true`;
+        request.post(mkdirUrl, {
+            headers: { 'authorization': authToken }, multipart: [
+                {
+                    body: JSON.stringify({ // Directory creation parameters copied from wdc request to mkdirUrl endpoint
+                        'name': folderName,
+                        'parentID': subPath,
+                        'mimeType': 'application/x.wd.dir',
+                    })
+                }
+            ]
+        }, (error, response) => {
+            if (response.statusCode === 401) {
+                resolve({ success: false, error: undefined, session: false });
+                return;
+            }
+            if (error) {
+                log.fatal('Something went wrong');
+                log.debug('Status code: ' + response.statusCode);
+                log.error(error);
+                resolve({ success: false, error: error, session: true });
+                return;
+            }
+
+            const locationParts = response.headers['location'].split('/'); // ID of the new folder gets sent in the location header
+            resolve({ success: true, error: undefined, session: true, result: locationParts[locationParts.length - 1] });
+        });
+    });
+}
+
+/**
+ * Remove an entry from the wdc
+ * @param {String} authToken The authenticaiton token
+ * @param {String} entryID The ID of the entry to remove
+ * @returns {Promise<InternalResult>} The result of the delete action
+ */
+function rm(authToken, entryID) {
+    return new Promise(async (resolve) => {
+        // Request body copied from a folder delete request
+        const postBody = `Content-Id: 0\r\n\r\nDELETE /sdk/v2/files/${entryID} HTTP/1.1\r\nHost: ${wdHost}.remotewd.com\r\nAuthorization: ${authToken}\r\n\r\n`;
+        // Send multipart/mixed to the server (since request module doesn't support the /mixed multipart MIME)
+        const result = await multipartMixed(postBody, authToken);
+        if (!result.success) resolve(result);
+        else resolve({ success: result.status == 200, error: undefined, session: true, result: true });
+    });
+}
+
+/**
  * Upload a file to the wdc
  * @param {String} authToken The authentication token
  * @param {String} subPath The folder ID to upload the file to
  * @param {String} pathToFile Path to the file on the local system
- * @param {Function} reportCompleted Function to call with current offset
- * @param {Function} reportDone Function to call when the upload is done
+ * @param {InternalTransferProgress} reportCompleted Function to call with current offset
+ * @param {InternalTransferDone} reportDone Function to call when the upload is done
  */
-
 function upl(authToken, subPath, pathToFile, reportCompleted, reportDone) {
-    // Start new file upload
+    /**
+     * Start a new file upload 
+     * @param {string} activityID The activity ID returned by the upload init request
+     */
     const startUpload = (activityID) => {
         const initUploadUrl = `https://${wdHost}.remotewd.com/sdk/v2/files/resumable?resolveNameConflict=1&done=false`;
         request.post(initUploadUrl, {
@@ -279,11 +421,13 @@ function upl(authToken, subPath, pathToFile, reportCompleted, reportDone) {
         });
     };
 
-    // Start activity and get its ID
+    /**
+     * Start activity and get its ID
+     */
     const startActivity = () => {
         request.post(`https://${wdHost}.remotewd.com/sdk/v1/activityStart`, { headers: { 'authorization': authToken } }, (error, response, body) => {
             if (response.statusCode === 401) {
-                resolve({ success: false, error: undefined, session: false });
+                reportDone({ success: false, error: undefined, session: false });
                 return;
             }
             if (error) {
@@ -302,30 +446,10 @@ function upl(authToken, subPath, pathToFile, reportCompleted, reportDone) {
 }
 
 /**
- * Yield the specified file's content in blocks
- * @param {String} filePath The path ofthe file on the local system
- */
-function* getFileContent(filePath) {
-    let currentOffset = 0;
-    const totalSize = fs.statSync(filePath).size;
-    const bufferSize = 20480; // Block size, each loop reads this many bytes
-    const fd = fs.openSync(filePath, 'r');
-    const buffer = Buffer.alloc(bufferSize); // Buffer to read file contents to
-    while (true) {
-        if (currentOffset >= totalSize) break;
-        const bytesRead = fs.readSync(fd, buffer, 0, bufferSize, currentOffset > totalSize ? currentOffset - totalSize : currentOffset);
-        const isDone = bytesRead != bufferSize; // EOF
-        yield { buffer, bytesRead, currentOffset, isDone };
-        if (isDone) break;
-        currentOffset += bytesRead;
-    }
-}
-
-/**
  * Upload file to the server in chunks
  * @param {Object} data Object with requested header and url data for uploading
- * @param {Function} progressCallback Function to call with the current offset
- * @param {Function} doneCallback Function to call when the upload is done
+ * @param {InternalTransferProgress} progressCallback Function to call with the current offset
+ * @param {InternalTransferDone} doneCallback Function to call when the upload is done
  * @param {String} filePath The path of the file on the local system
  */
 async function uploadManual(data, progressCallback, doneCallback, filePath) {
@@ -364,6 +488,7 @@ async function uploadManual(data, progressCallback, doneCallback, filePath) {
  * Get the size of a file on the wdc
  * @param {String} authToken The authentication token
  * @param {String} fileID The ID of the file to get the size of
+ * @returns {Promise<InternalResult>} The result of getting the file size of a remote file
  */
 function getFileSize(authToken, fileID) {
     return new Promise((resolve) => {
@@ -390,7 +515,7 @@ function getFileSize(authToken, fileID) {
  * @param {String} authToken The authentication token
  * @param {String} fileID The ID of the file
  * @param {String} localPath The path of the local file to download to
- * @param {Function} progressCallback Function to call with offset and total size
+ * @param {InternalTransferProgress} progressCallback Function to call with offset and total size
  */
 function dwl(authToken, fileID, localPath, progressCallback) {
     return new Promise(async (resolve) => {
@@ -428,78 +553,13 @@ function dwl(authToken, fileID, localPath, progressCallback) {
     });
 }
 
-/**
- * Enter to a directory on the server, equivalent to 'cd' command with relative path
- * @param {String} folderID The ID of the folder to enter to
- */
-function enterDirectory(folderID) {
-    if (folderID === undefined) return;
-    pathStack.push(folderID);
-}
+// #endregion
 
-/**
- * Enters a directory, but also clears the previous directory list
- * @param {String} path The ID of the folder to enter to
- */
-function setPath(path) {
-    pathStack = [];
-    enterDirectory(path);
-}
-
-/**
- * Enters the previous directory (if there's one)
- */
-function enterParentDirectory() {
-    if (pathStack.length > 0) pathStack.splice(pathStack.length - 1, 1);
-    else return false;
-    return true;
-}
-
-/**
- * Get the current folder ID of the pathStack
- */
-function getCurrentFolder() {
-    if (pathStack.length > 0) return pathStack[pathStack.length - 1];
-    else return undefined;
-}
-
-/**
- * Remove the last x entries of the pathStack
- * @param {Integer} removeCount Number of entries to remove from the pathStack
- */
-function removePathStackEntries(removeCount) {
-    for (let i = 0; i < removeCount; i++) {
-        if (!enterParentDirectory()) break;
-    }
-}
-
-/**
- * Login the to my cloud website
- * @param {String} username The username
- * @param {String} password The password
- */
-function authenticate(username, password) {
-    creds.user = username;
-    creds.pass = password;
-    return new Promise(async (resolve) => {
-        const loginResult = await login(username, password);
-        resolve(loginResult);
-    });
-}
-
-/**
- * List the files in the current folder
- */
-async function listFiles() {
-    try {
-        return await retryLimited(10, 'list files', _listFiles, []);
-    } catch (error) {
-        throw error;
-    }
-}
+// #region Abstracted functions
 
 /**
  * Retryable function for listing files
+ * @returns {Promise<AbstractedResult>} The result of the abstracted function
  */
 async function _listFiles() {
     const currentPath = pathStack.length > 0 ? pathStack[pathStack.length - 1] : 'root';
@@ -521,20 +581,9 @@ async function _listFiles() {
 }
 
 /**
- * Create a new directory in the current directory
- * @param {String} dirName The name of the new directory
- */
-async function createDirectory(dirName) {
-    try {
-        return await retryLimited(10, 'create new directory', _createDirectory, [dirName]);
-    } catch (error) {
-        throw error;
-    }
-}
-
-/**
  * Retryable function for creating new directories
  * @param {String} dirName The name of the directory to create
+ * @returns {Promise<AbstractedResult>} The result of the abstracted function
  */
 function _createDirectory(dirName) {
     return new Promise(async (resolve) => {
@@ -559,20 +608,9 @@ function _createDirectory(dirName) {
 }
 
 /**
- * Deletes a file/folder in the current directory
- * @param {String} fileID The ID of the file/folder to remove
- */
-async function removeFile(fileID) {
-    try {
-        return await retryLimited(10, 'remove file', _removeFile, [fileID]);
-    } catch (error) {
-        throw error;
-    }
-}
-
-/**
  * Retryable function for removing entries
  * @param {String} fileID The ID of the entry to remove
+ * @returns {Promise<AbstractedResult>} The result of the abstracted function
  */
 async function _removeFile(fileID) {
     // Remove the file/folder
@@ -592,22 +630,10 @@ async function _removeFile(fileID) {
 }
 
 /**
- * Uploads a local file to the current folder on the cloud
- * @param {String} filePath The local path of the file to upload
- * @param {Function} progressCallback A function to send the percentage to
- */
-async function uploadFile(filePath, progressCallback) {
-    try {
-        return await retryLimited(10, 'upload file', _uploadFile, [filePath, progressCallback]);
-    } catch (error) {
-        throw error;
-    }
-}
-
-/**
  * Retryable function for uploading a file
  * @param {String} filePath The path of the file on the local system
- * @param {Function} progressCallback The function to be called with the progress of the upload
+ * @param {InternalTransferProgress} progressCallback The function to be called with the progress of the upload
+ * @returns {Promise<AbstractedResult>} The result of the abstracted function
  */
 function _uploadFile(filePath, progressCallback) {
     return new Promise((resolve) => {
@@ -637,7 +663,7 @@ function _uploadFile(filePath, progressCallback) {
                     resolve({ success: false });
                 } else {
                     // Session timed out, login and run the function again
-                    const self = await authRetry(uploadFile, [filePath, progressCallback]);
+                    const self = await authRetry(_uploadFile, [filePath, progressCallback]);
                     const result = await self;
                     resolve(result);
                 }
@@ -647,24 +673,11 @@ function _uploadFile(filePath, progressCallback) {
 }
 
 /**
- * Download a file from the wdc
- * @param {String} fileID The ID of the file to download
- * @param {String} localFilePath The path to save the remote file to on the local system
- * @param {Function} progressCallback Function to call with the percentage progress
- */
-async function downloadFile(fileID, localFilePath, progressCallback) {
-    try {
-        return await retryLimited(10, 'download file', _downloadFile, [fileID, localFilePath, progressCallback]);
-    } catch (error) {
-        throw error;
-    }
-}
-
-/**
  * Retryable function for downloading files from the wdc
  * @param {String} fileID The ID of the file to download
  * @param {String} localFilePath The path to save the remote file to on the local system
- * @param {Function} progressCallback Function to call with the percentage progress
+ * @param {InternalTransferProgress} progressCallback Function to call with the percentage progress
+ * @returns {Promise<AbstractedResult>} The result of the abstracted function
  */
 async function _downloadFile(fileID, localFilePath, progressCallback) {
     const result = await dwl(tokens.auth, fileID, localFilePath, (data) => {
@@ -687,40 +700,127 @@ async function _downloadFile(fileID, localFilePath, progressCallback) {
     }
 }
 
-/**
- * Retry an abstracted function a certain if failed
- * @param {Integer} tryLimit The number of maxiumum executions of the specified function
- * @param {String} actionName The friendly display name of the action
- * @param {Function} abstractedFunction The abstracted function to call to exectue the action
- * @param {Array} afArgs An array of arguments to pass to the abstracted function
- */
-async function retryLimited(tryLimit, actionName, abstractedFunction, afArgs) {
-    let tryCounter = 0;
-    const callAbstracted = async () => {
-        if (tryCounter > tryLimit) {
-            return { success: false };
-        }
-        tryCounter++;
-        if (tryCounter > 1) log.debug(`Attempt ${tryCounter} to ${actionName}`);
-        const result = await abstractedFunction(...afArgs);
-        if (!result.success) return await callAbstracted();
-        else return { success: true, data: result.data };
-    };
+// #endregion
 
-    const recursiveResult = await callAbstracted();
-    if (recursiveResult.success) return recursiveResult.data;
-    else throw new Error(`tried to ${actionName} 10 times and failed`);
+// #region External functions
+
+/**
+ * Enter to a directory on the server, equivalent to 'cd' command with relative path
+ * @param {String} folderID The ID of the folder to enter to
+ */
+function enterDirectory(folderID) {
+    if (folderID === undefined) return;
+    pathStack.push(folderID);
 }
 
 /**
- * Re-authenticate the client and try the current action again
- * @param {Function} func The function to call after re-authenticating
- * @param {Array} args An array of arguments to pass to the function
+ * Enters the previous directory (if there's one)
  */
-async function authRetry(func, args) {
-    log.warn('Re-authentication initiated');
-    await authenticate(creds.user, creds.pass); // Authenticate with cached credentials
-    return func(...args); // Re-call the parent function
+function enterParentDirectory() {
+    if (pathStack.length > 0) pathStack.splice(pathStack.length - 1, 1);
+    else return false;
+    return true;
+}
+
+/**
+ * Get the current folder ID of the pathStack
+ * @returns {(undefined|string)} The current working directory on the remote system, undefined if there were no changes at all
+ */
+function getCurrentFolder() {
+    if (pathStack.length > 0) return pathStack[pathStack.length - 1];
+    else return undefined;
+}
+
+/**
+ * Remove the last x entries of the pathStack
+ * @param {number} removeCount Number of entries to remove from the pathStack
+ */
+function removePathStackEntries(removeCount) {
+    for (let i = 0; i < removeCount; i++) {
+        if (!enterParentDirectory()) break;
+    }
+}
+
+/**
+ * Login the to my cloud website
+ * @param {String} username The username
+ * @param {String} password The password
+ * @returns {Promise<Boolean>} The result of the authentication
+ */
+function authenticate(username, password) {
+    creds.user = username;
+    creds.pass = password;
+    return new Promise(async (resolve) => {
+        const loginResult = await login(username, password);
+        resolve(loginResult);
+    });
+}
+
+/**
+ * List the files in the current folder
+ * @returns {Array<RemoteEntry>} An array of the remote entries in the current directory
+ */
+async function listFiles() {
+    try {
+        return await retryLimited(10, 'list files', _listFiles, []);
+    } catch (error) {
+        throw error;
+    }
+}
+
+/**
+ * Create a new directory in the current directory
+ * @param {String} dirName The name of the new directory
+ * @returns {string} The ID of the newly created directory
+ */
+async function createDirectory(dirName) {
+    try {
+        return await retryLimited(10, 'create new directory', _createDirectory, [dirName]);
+    } catch (error) {
+        throw error;
+    }
+}
+
+/**
+ * Deletes a file/folder in the current directory
+ * @param {String} fileID The ID of the file/folder to remove
+ * @returns {Boolean} True if the deletion succeeded, otherwise false
+ */
+async function removeFile(fileID) {
+    try {
+        return await retryLimited(10, 'remove file', _removeFile, [fileID]);
+    } catch (error) {
+        throw error;
+    }
+}
+
+/**
+ * Uploads a local file to the current folder on the cloud
+ * @param {String} filePath The local path of the file to upload
+ * @param {InternalTransferProgress} progressCallback A function to send the percentage to
+ * @returns {Boolean} True if the upload succeeded, otherwise false
+ */
+async function uploadFile(filePath, progressCallback) {
+    try {
+        return await retryLimited(10, 'upload file', _uploadFile, [filePath, progressCallback]);
+    } catch (error) {
+        throw error;
+    }
+}
+
+/**
+ * Download a file from the wdc
+ * @param {String} fileID The ID of the file to download
+ * @param {String} localFilePath The path to save the remote file to on the local system
+ * @param {InternalTransferProgress} progressCallback Function to call with the percentage progress
+ * @returns {Boolean} True if the upload succeeded, otherwise false
+ */
+async function downloadFile(fileID, localFilePath, progressCallback) {
+    try {
+        return await retryLimited(10, 'download file', _downloadFile, [fileID, localFilePath, progressCallback]);
+    } catch (error) {
+        throw error;
+    }
 }
 
 /**
@@ -744,6 +844,8 @@ function disableAPIMessages() {
 function setWdHost(host) {
     wdHost = host;
 }
+// #endregion
+
 module.exports = {
     authenticate,
     enterDirectory,
@@ -757,5 +859,5 @@ module.exports = {
     downloadFile,
     enableAPIMessages,
     disableAPIMessages,
-    setWdHost,
+    setWdHost
 };

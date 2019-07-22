@@ -28,6 +28,7 @@ const settings = require('./settings');
 let cwdCache = null;
 /**
  * The local working directory
+ * @type {string}
  */
 let lwd = __dirname;
 
@@ -69,6 +70,10 @@ function formatPath(inputPath) {
     return inputPath.startsWith('/') ? inputPath : path.join(lwd, inputPath);
 }
 
+/**
+ * Upload a folder to the current working directory of the remote
+ * @param {string} srcFolderPath The path of the folder to upload to the remote
+ */
 async function recursiveUploadFolders(srcFolderPath) {
     const uploadFolder = async (local, parent) => {
         // Enter the parent directory
@@ -106,11 +111,9 @@ async function recursiveUploadFolders(srcFolderPath) {
 
         // Upload files to remote
         for (const file of fileList) {
-            module.exports.currentFileName = file;
-            module.exports.currentProgress = 0;
             log.startFileUpload(file);
             try {
-                await bridge.uploadFile(local + '/' + file, (progress) => log.setUploadProgress(file, progress));
+                await bridge.uploadFile(path.join(local, file), (progress) => log.setUploadProgress(file, progress));
                 log.fileUploadDone();
             } catch (error) {
                 log.fileUploadFail(error);
@@ -120,7 +123,7 @@ async function recursiveUploadFolders(srcFolderPath) {
         // Check folders in current local directory for more entries
         for (let i = 0; i < folderList.length; i++) {
             // Upload child folder, will enter child folder as parent
-            await uploadFolder(local + '/' + folderList[i], idList[i]);
+            await uploadFolder(path.join(local, folderList[i]), idList[i]);
             // Restore the parent folder in the api stack
             bridge.enterParentDirectory();
         }
@@ -132,6 +135,11 @@ async function recursiveUploadFolders(srcFolderPath) {
     await uploadFolder(srcFolderPath, mainFolderID);
 }
 
+/**
+ * Download an entire folder from the remote device to the local system
+ * @param {string} srcFolderID The ID of the remote forlder to download
+ * @param {string} basepath The path to download the folder to, including the name of the folder
+ */
 async function recursiveDownloadFolders(srcFolderID, basepath) {
     const downloadFolder = async (remoteFolderID, localPath) => {
         // Enter the current directory
@@ -309,6 +317,9 @@ async function handleCommands() {
             console.log('cd [path] - change the current working directory');
             console.log('upload [local file path] - upload a file to the current working directory');
             console.log('download [remote file name] - download a remote file from the current working directory');
+            console.log('l pwd - print the current working directory on the local system');
+            console.log('l cd [local path] - change the current working directory on the local system');
+            console.log('l ls [path] - list files in the given folder/current working directory if not given');
         } else if (command.startsWith('l ')) {
             const localCommand = command.substring(2);
             if (localCommand === 'pwd') {
@@ -331,6 +342,7 @@ async function handleCommands() {
                 if (fs.existsSync(fullPath)) {
                     const entries = fs.readdirSync(fullPath);
                     entries.sort((left, right) => {
+                        // Ignore case, and dots
                         const a = left.toLowerCase().replace('.', '');
                         const b = right.toLowerCase().replace('.', '');
                         if (a > b) return 1;
