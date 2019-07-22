@@ -128,6 +128,14 @@ function onlyRelativePath() {
     signale.error('Path must be relative (the specified path should not contain path separator characters)');
 }
 
+/**
+ * Print folder creationg successful message
+ * @param {string} folderName The name of the new folder
+ */
+function folderCreated(folderName) {
+    signale.success('Folder \'%s\' created successfully', folderName);
+}
+
 module.exports = {
     authSuccess,
     authFailed,
@@ -142,5 +150,6 @@ module.exports = {
     onlyRelativePath,
     fileUploadFail,
     fileDownloadFail,
-    getAPILogger
-}
+    getAPILogger,
+    folderCreated
+};

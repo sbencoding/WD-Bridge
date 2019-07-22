@@ -69,6 +69,119 @@ function formatPath(inputPath) {
     return inputPath.startsWith('/') ? inputPath : path.join(lwd, inputPath);
 }
 
+async function recursiveUploadFolders(srcFolderPath) {
+    const uploadFolder = async (local, parent) => {
+        // Enter the parent directory
+        bridge.enterDirectory(parent);
+
+        /**
+         * Entires in the current local folder
+         */
+        const entries = fs.readdirSync(local);
+        /**
+         * List of folders in the current local folder
+         */
+        const folderList = [];
+        /**
+         * List of files in the current local folder
+         */
+        const fileList = [];
+        /**
+         * List of the created folder IDs on the remote
+         */
+        const idList = [];
+
+        // Enumerate entries in current local directory
+        entries.forEach(entry => {
+            if (fs.statSync(local + '/' + entry).isDirectory()) folderList.push(entry);
+            else fileList.push(entry);
+        });
+
+        // Create folders on remote
+        for (const folder of folderList) {
+            const directoryID = await bridge.createDirectory(folder);
+            log.folderCreated(folder);
+            idList.push(directoryID);
+        }
+
+        // Upload files to remote
+        for (const file of fileList) {
+            module.exports.currentFileName = file;
+            module.exports.currentProgress = 0;
+            log.startFileUpload(file);
+            try {
+                await bridge.uploadFile(local + '/' + file, (progress) => log.setUploadProgress(file, progress));
+                log.fileUploadDone();
+            } catch (error) {
+                log.fileUploadFail(error);
+            }
+        }
+
+        // Check folders in current local directory for more entries
+        for (let i = 0; i < folderList.length; i++) {
+            // Upload child folder, will enter child folder as parent
+            await uploadFolder(local + '/' + folderList[i], idList[i]);
+            // Restore the parent folder in the api stack
+            bridge.enterParentDirectory();
+        }
+    };
+
+    // Create main directory on remote
+    const mainFolderID = await bridge.createDirectory(path.basename(srcFolderPath));
+    // Begin uploading content
+    await uploadFolder(srcFolderPath, mainFolderID);
+}
+
+async function recursiveDownloadFolders(srcFolderID, basepath) {
+    const downloadFolder = async (remoteFolderID, localPath) => {
+        // Enter the current directory
+        bridge.enterDirectory(remoteFolderID);
+
+        /**
+         * Entires in the current remote folder
+         */
+        const entries = await bridge.listFiles();
+        /**
+         * List of folders in the current remote folder
+         */
+        const folderList = entries.filter(entry => entry.isDir);
+        /**
+         * List of files in the current remote folder
+         */
+        const fileList = entries.filter(entry => !entry.isDir);
+
+        // Create folders on the local system
+        for (const folder of folderList) {
+            const localPathNewFolder = path.join(localPath, folder.name);
+            fs.mkdirSync(localPathNewFolder);
+        }
+
+        // Download files from remote
+        for (const file of fileList) {
+            log.startFileDownload(file.name);
+            const filePath = path.join(localPath, file.name);
+            try {
+                await bridge.downloadFile(file.id, filePath, (progress) => log.setDownloadProgress(file.name, progress));
+                log.fileDownloadDone(filePath);
+            } catch (error) {
+                log.fileDownloadFail(error);
+            }
+        }
+
+        // Download subfolders from the remote
+        for (const folder of folderList) {
+            // Download the subfolder from the remote
+            await downloadFolder(folder.id, path.join(localPath, folder.name));
+        }
+    };
+
+    bridge.enterDirectory(srcFolderID);
+    // Create main directory on remote
+    fs.mkdirSync(basepath);
+    // Begin uploading content
+    await downloadFolder(srcFolderID, basepath);
+}
+
 /**
  * Simple command shell for user interaction
  */
@@ -148,12 +261,17 @@ async function handleCommands() {
             const localPath = command.substring(7);
             const fullLocalPath = formatPath(localPath);
             const fileName = path.basename(fullLocalPath);
-            log.startFileUpload(fileName);
-            try {
-                await bridge.uploadFile(fullLocalPath, (progress) => log.setUploadProgress(fileName, progress.toFixed(2)));
-                log.fileUploadDone();
-            } catch (error) {
-                log.fileUploadFail(error);
+            const entryIsDirectory = fs.statSync(fullLocalPath).isDirectory();
+            if (entryIsDirectory) {
+                await recursiveUploadFolders(fullLocalPath);
+            } else {
+                log.startFileUpload(fileName);
+                try {
+                    await bridge.uploadFile(fullLocalPath, (progress) => log.setUploadProgress(fileName, progress.toFixed(2)));
+                    log.fileUploadDone();
+                } catch (error) {
+                    log.fileUploadFail(error);
+                }
             }
         } else if (command.startsWith('download ')) {
             const entryName = command.substring(9);
@@ -162,15 +280,19 @@ async function handleCommands() {
             } else {
                 if (cwdCache === null) cwdCache = await bridge.listFiles();
                 
-                const target = cwdCache.find(item => item.name == entryName && !item.isDir);
+                const target = cwdCache.find(item => item.name == entryName);
                 if (target !== undefined) {
-                    try {
-                        log.startFileDownload(target.name);
-                        const localPath = path.join(lwd, target.name);
-                        await bridge.downloadFile(target.id, localPath, (progress) => log.setDownloadProgress(target.name, progress.toFixed(2)));
-                        log.fileDownloadDone(localPath);
-                    } catch (error) {
-                        log.fileDownloadFail(error);
+                    const localPath = path.join(lwd, target.name);
+                    if (target.isDir) {
+                        await recursiveDownloadFolders(target.id, localPath);
+                    } else {
+                        try {
+                            log.startFileDownload(target.name);
+                            await bridge.downloadFile(target.id, localPath, (progress) => log.setDownloadProgress(target.name, progress.toFixed(2)));
+                            log.fileDownloadDone(localPath);
+                        } catch (error) {
+                            log.fileDownloadFail(error);
+                        }
                     }
                 }
                 else log.pathNotFound(entryName);
