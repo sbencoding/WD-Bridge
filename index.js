@@ -129,10 +129,14 @@ async function recursiveUploadFolders(srcFolderPath) {
         }
     };
 
+    // Save current folder, to restore after upload is done
+    const currentFolderID = bridge.getCurrentFolder();
     // Create main directory on remote
     const mainFolderID = await bridge.createDirectory(path.basename(srcFolderPath));
     // Begin uploading content
     await uploadFolder(srcFolderPath, mainFolderID);
+    // Restore original working directory
+    bridge.enterDirectory(currentFolderID);
 }
 
 /**
@@ -183,11 +187,15 @@ async function recursiveDownloadFolders(srcFolderID, basepath) {
         }
     };
 
+    // Get the ID of the current working directory
+    const currentFolderID = bridge.getCurrentFolder();
     bridge.enterDirectory(srcFolderID);
     // Create main directory on remote
     fs.mkdirSync(basepath);
     // Begin uploading content
     await downloadFolder(srcFolderID, basepath);
+    // Restore the original working directory
+    bridge.enterDirectory(currentFolderID);
 }
 
 /**
