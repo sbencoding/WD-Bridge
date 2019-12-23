@@ -1,3 +1,7 @@
+# Disclaimer
+For reasons stated in the [wdfs repo](https://github.com/sbencoding/wdfs) I'm discontinuing support for the `terminal prompt` part of this project and I'm going to focus on the nodeJS API itself that can be implemented by other applications.  
+- If you only want to access your device from linux and you don't care about the API then I suggest checking out the other repo as it's better and more robust for your use case. You can use already existing linux tools such as `ls`, `cp` and `cat` for file system interaction.  
+- If you're here for the API I'm going to make improvements to it in the future, but the terminal part is going to be removed
 # WD Bridge
 WD Bridge is a terminal application/API written in NodeJS, that uses the WD web sdk under the hood, to access WD cloud devices that don't appear as a NAS on the local network.  
 This API was made because there was no way to programatically manage my WD My Cloud Home device, nor is it reachable from the terminal under a linux/unix device.  
